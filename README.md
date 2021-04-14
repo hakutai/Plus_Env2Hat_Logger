@@ -2,7 +2,7 @@
 
 M5StickCPlus用の気温・湿度・気圧のデータ収集、およびBluetooth送信。
 
-![english manual](images/Manual_ja.jpg)
+![english manual](images/Manual_ja2.jpg)
 
 ## 必要なもの
 * M5StickCPlus
