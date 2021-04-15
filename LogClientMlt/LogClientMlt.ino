@@ -8,8 +8,6 @@
  * 
 */
 
-
- 
 #include <M5StickC.h>
 #include <Wire.h>
 #include "NimBLEDevice.h"
@@ -27,7 +25,7 @@ typedef struct {   // Bluetoothで送信するデータ     2byte * 7 = 14
   uint8_t         id = 0;             // uniqueID 送信側の個々IDに使用
   union {
     struct {
-      char       alarmTL : 1;          // 低温度アラーム
+      char       alarmTL : 1;         // 低温度アラーム
       char       alarmTH : 1;         // 高温度アラーム
       char       unused  : 6;         // 未使用
     };
