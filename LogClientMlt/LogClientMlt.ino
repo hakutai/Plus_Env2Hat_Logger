@@ -80,6 +80,7 @@ char           tmpStr[80];
  *    取得データを該当ペリフェラルへコピー
  */
 static void notifyCallback(NimBLERemoteCharacteristic *pBLERemoteCharacteristic, uint8_t *pData, size_t length, bool isNotify) {
+  int     k;
 //    Serial.print("Notify callback for characteristic ");
 //    Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
 //    Serial.print(" of data length ");
@@ -97,10 +98,10 @@ static void notifyCallback(NimBLERemoteCharacteristic *pBLERemoteCharacteristic,
   Serial.printf("Pres %.1f / Volt %.2f /",bleDataPacket.pressure / 10.,bleDataPacket.voltage / 100.);
   Serial.printf("Adrs %s / RSSI %d\r\n",pBLERemoteCharacteristic->getRemoteService()->getClient()->getPeerAddress().toString().c_str(),pBLERemoteCharacteristic->getRemoteService()->getClient()->getRssi());
     
-  for (i = 0; i < kDevice; i++) {   
-    if (deviceList[i].serverAdrs.equals(pBLERemoteCharacteristic->getRemoteService()->getClient()->getPeerAddress())) {
-      deviceList[i].dataPacket = bleDataPacket;
-      deviceList[i].rssi       = pBLERemoteCharacteristic->getRemoteService()->getClient()->getRssi();
+  for (k = 0; k < kDevice; k++) {   
+    if (deviceList[k].serverAdrs.equals(pBLERemoteCharacteristic->getRemoteService()->getClient()->getPeerAddress())) {
+      deviceList[k].dataPacket = bleDataPacket;
+      deviceList[k].rssi       = pBLERemoteCharacteristic->getRemoteService()->getClient()->getRssi();
       break;
     }
   }
@@ -116,12 +117,13 @@ class ClientCallback : public NimBLEClientCallbacks {
   }
 
   void onDisconnect(BLEClient* pclient) {
-    for (i = 0; i < kDevice; i++) {
-      if (deviceList[i].pDevice == NULL) continue;
+    int       k;
+    for (k = 0; k < kDevice; k++) {
+      if (deviceList[k].pDevice == NULL) continue;
 
-      if (pclient->getPeerAddress().equals(deviceList[i].pDevice->getAddress())) {
-        Serial.printf("onDisconnect Adrs : %s (ID:%d)\r\n",pclient->getPeerAddress().toString().c_str(),i);
-        deviceList[i].connected = false;                // 再接続要請
+      if (pclient->getPeerAddress().equals(deviceList[k].pDevice->getAddress())) {
+        Serial.printf("onDisconnect Adrs : %s (ID:%d)\r\n",pclient->getPeerAddress().toString().c_str(),k);
+        deviceList[k].connected = false;                // 再接続要請
         break;
       }
     }
@@ -187,15 +189,16 @@ class AdvertisedDeviceCallbacks: public NimBLEAdvertisedDeviceCallbacks {
    * Called for each advertising BLE server.
    */
   void onResult(NimBLEAdvertisedDevice *advertisedDevice) {
+    int     k;
     if (advertisedDevice->isAdvertisingService(serviceUUID)) {
       Serial.print("BLE Advertised Device found: ");
       Serial.println(advertisedDevice->toString().c_str());
 
       doScan = false;
-      for (i = 0; i < kDevice; i++) {      // 既知ペリフェラル？
-        if (deviceList[i].serverAdrs.equals(advertisedDevice->getAddress())) {
+      for (k = 0; k < kDevice; k++) {      // 既知ペリフェラル？
+        if (deviceList[k].serverAdrs.equals(advertisedDevice->getAddress())) {
           Serial.printf("reConnected Device %s\r\n",advertisedDevice->getName().c_str());
-          deviceList[i].doConnect = true;
+          deviceList[k].doConnect = true;
           doScan = true;
           break;
         }
