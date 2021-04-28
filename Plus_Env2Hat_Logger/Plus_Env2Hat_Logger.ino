@@ -8,8 +8,11 @@
  * 
  * @note
  *   2021/03/26 BLEの接続ー＞切断ー＞接続の手順が正しいかは不明、デバイス名を変える時は一度オフにし、再度違い名前にする
+ *   2021/04/15 ピンソケット＋Grove＋内部接続（ＲTC/電源管理）の３系統同時は複雑になるようだ、要調査
  *   
  * @version
+ *   2021/04/28 1.07    Deepsleepの時間設定を秒単位に変更（分単位だと時間が飛ぶ事がある）
+ *   2021/04/15 1.06    TVOC/SGP30ユニットを追加（未完）
  *   2021/04/08 1.05    アラーム方法の変更（BLE時はブザーナシに）
  *   2021/04/07 1.04    送信データ構造の変更
  *   2021/04/06 1.03    BLEライブラリをNimBLE変更
@@ -25,8 +28,9 @@
 #include <math.h>
 #include "SHT3X.h"
 #include <Wire.h>
-#include "Adafruit_Sensor.h"
+#include <Adafruit_Sensor.h>
 #include <Adafruit_BMP280.h>
+#include <Adafruit_SGP30.h>
 
 #include <NimBLEDevice.h>
 
@@ -35,6 +39,7 @@
  */
 SHT3X                       sht3x;              // 温湿度センサー
 Adafruit_BMP280             bmp280;             // 気圧センサー
+Adafruit_SGP30              sgp30;              // TVOC/eCO2センサー
 
 #define     LED_PIN       GPIO_NUM_10           // 付属LEDのGPIOの番号
 /*---------------------------------------------------------
@@ -48,6 +53,8 @@ float       pressure      = 0.0;      // 気圧
 float       altitude      = 0.0;      // 高度
 int         wbgtIndex     = 0.0;      // 暑さ指数（Wet Bulb Globe Temperature）
 int         discomfortIndex = 0.0;    // 不快指数（discomfort index）
+int         tvoc          = 0;        // TVOC(揮発性有機化合物)
+int         eCO2          = 0;        // eCO2(二酸化炭素相当量)
 
         // センサーアラーム
 #define     MAXSET_TEMPLOW    -20
@@ -81,6 +88,9 @@ uint16_t                  demoMode      = 0;                // デモモード�
 
 uint32_t                  powerOffTime = defaultPowerOffTime;    // ディープスリープへ移行する時間
 
+boolean       foundSGP30  = false;                          // SGP30センサー有り
+long          readySGP30  = 15 * 1000;                      // 0=> SGP30センサー使用可、> 0 未初期化
+
         // 画面用　ダブルバッファー他
 int16_t       scrnWidth,scrnHeight;                         // スクリーン（LCD)縦横
 TFT_eSprite   lcdDblBuf = TFT_eSprite(&M5.Lcd);             // ダブルバッファー
@@ -102,54 +112,54 @@ typedef struct PressArray_ {            //  RTCメモリへ保存構造体
 #define CLEAR_PRESSARRAY {0,0,0,0,0}    // 構造体初期化値
 #ifdef DEBUG_MODE
 RTC_DATA_ATTR PressArray presAry[MAX_PRESSARRAY] = {
-                                                     { 29,  0, 1005, 22, 54 },  //  0:00
-                                                     { 29, 30, 1004, 22, 55 },  //  0:30
-                                                     { 29,  0, 1004, 22, 55 },  //  1:00
-                                                     { 29, 30, 1003, 22, 55 },  //  1:30
-                                                     { 29,  0, 1001, 22, 56 },  //  2:00
-                                                     { 29, 30, 1001, 22, 56 },  //  2:30
-                                                     { 29,  0, 1001, 22, 55 },  //  3:00
-                                                     { 29, 30, 1000, 22, 55 },  //  3:30
-                                                     { 29,  0, 1000, 22, 55 },  //  4:00
-                                                     { 29, 30, 1001, 22, 54 },  //  4:30
-                                                     { 29,  0, 1001, 22, 54 },  //  5:00
-                                                     { 29, 30, 1001, 22, 54 },  //  5:30
-                                                     { 29,  0, 1001, 22, 55 },  //  6:00
-                                                     { 29, 30, 1002, 22, 55 },  //  6:30
-                                                     { 29,  0, 1002, 22, 55 },  //  7:00
-                                                     { 29, 30, 1002, 22, 56 },  //  7:30
-                                                     { 29,  0, 1002, 22, 55 },  //  8:00
-                                                     { 29, 30, 1002, 23, 55 },  //  8:30
-                                                     { 29,  0, 1002, 23, 56 },  //  9:00
-                                                     { 29, 30, 1002, 22, 55 },  //  9:30
-                                                     { 29,  0, 1002, 23, 55 },  // 10:00
-                                                     { 29, 30, 1003, 23, 56 },  // 10:30
-                                                     { 29,  0, 1003, 26, 49 },  // 11:00
-                                                     { 30, 30, 1008, 28, 50 },  // 11:30
-                                                     { 30,  0, 1007, 28, 42 },  // 12:00
-                                                     { 30, 30, 1007, 29, 39 },  // 12:30
-                                                     { 30,  0, 1007, 28, 40 },  // 13:00
-                                                     { 30, 30, 1006, 28, 40 },  // 13:30
-                                                     { 28,  0,  863, 17, 66 },  // 14:00
-                                                     { 28, 30,  863, 17, 66 },  // 14:30
-                                                     { 28,  0,  862, 15, 65 },  // 15:00
-                                                     { 28, 30,  862, 14, 65 },  // 15:30
-                                                     { 28,  0,  880, 14, 66 },  // 16:00
-                                                     { 28, 30,  880, 14, 66 },  // 16:30
-                                                     { 28,  0,  909, 14, 66 },  // 17:00
-                                                     { 28, 30,  927, 14, 66 },  // 17:30
-                                                     { 28,  0,  898, 14, 66 },  // 18:00
-                                                     { 28, 30,  978, 14, 66 },  // 18:30
-                                                     { 28,  0,  967, 14, 66 },  // 19:00
-                                                     { 28, 30,  996, 15, 67 },  // 19:30
-                                                     { 28,  0, 1004, 15, 67 },  // 20:00
-                                                     { 28, 30, 1012, 16, 67 },  // 20:30
-                                                     { 28,  0, 1008, 16, 67 },  // 21:00
-                                                     { 28, 30, 1008, 19, 67 },  // 21:30
-                                                     { 28,  0, 1008, 21, 64 },  // 22:00
-                                                     { 28, 30, 1007, 22, 62 },  // 22:30
-                                                     { 28,  0, 1007, 23, 56 },  // 23:00
-                                                     { 28, 30, 1006, 23, 55 },  // 23:30
+                                                     { 15,  0, 1012, 31, 36 },  //  0:00
+                                                     { 15, 30, 1013, 30, 37 },  //  0:30
+                                                     { 15,  0, 1013, 30, 37 },  //  1:00
+                                                     { 15, 30, 1014, 29, 37 },  //  1:30
+                                                     { 15,  0, 1014, 29, 37 },  //  2:00
+                                                     { 15, 30, 1014, 29, 38 },  //  2:30
+                                                     { 15,  0, 1015, 28, 38 },  //  3:00
+                                                     { 15, 30, 1015, 28, 38 },  //  3:30
+                                                     { 15,  0, 1016, 28, 38 },  //  4:00
+                                                     { 15, 30, 1016, 28, 38 },  //  4:30
+                                                     { 15,  1, 1017, 28, 38 },  //  5:00
+                                                     { 15, 30, 1018, 28, 38 },  //  5:30
+                                                     { 15,  0, 1018, 27, 38 },  //  6:00
+                                                     { 15, 30, 1019, 27, 38 },  //  6:30
+                                                     { 15,  0, 1019, 27, 38 },  //  7:00
+                                                     { 15, 30, 1019, 24, 47 },  //  7:30
+                                                     { 15,  0, 1019, 23, 59 },  //  8:00
+                                                     { 15, 30, 1020, 23, 57 },  //  8:30
+                                                     { 15,  0, 1020, 23, 60 },  //  9:00
+                                                     { 15, 30, 1023, 23, 49 },  //  9:30
+                                                     { 15,  0, 1021, 23, 45 },  // 10:00
+                                                     { 15, 30, 1021, 24, 40 },  // 10:30
+                                                     { 15,  0, 1021, 25, 37 },  // 11:00
+                                                     { 15, 30, 1020, 25, 35 },  // 11:30
+                                                     { 15,  0, 1020, 25, 34 },  // 12:00
+                                                     { 15, 30, 1020, 25, 32 },  // 12:30
+                                                     { 15,  0, 1020, 25, 31 },  // 13:00
+                                                     { 15, 30, 1020, 25, 30 },  // 13:30
+                                                     { 15,  0, 1020, 24, 29 },  // 14:00
+                                                     { 15, 30, 1020, 25, 30 },  // 14:30
+                                                     { 15,  0, 1019, 25, 29 },  // 15:00
+                                                     { 15, 30, 1020, 25, 28 },  // 15:30
+                                                     { 15,  0, 1021, 24, 29 },  // 16:00
+                                                     { 15, 30, 1021, 24, 29 },  // 16:30
+                                                     { 15,  0, 1021, 24, 29 },  // 17:00
+                                                     { 14, 30, 1004, 24, 58 },  // 17:30
+                                                     { 14,  0, 1004, 24, 57 },  // 18:00
+                                                     { 14, 30, 1006, 24, 56 },  // 18:30
+                                                     { 14,  0, 1006, 24, 55 },  // 19:00
+                                                     { 14, 30, 1009, 24, 57 },  // 19:30
+                                                     { 14,  0, 1006, 25, 57 },  // 20:00
+                                                     { 14, 30, 1008, 25, 68 },  // 20:30
+                                                     { 14,  0, 1009, 27, 73 },  // 21:00
+                                                     { 14, 30, 1010, 34, 42 },  // 21:30
+                                                     { 14,  0, 1009, 36, 48 },  // 22:00
+                                                     { 14, 30, 1010, 36, 56 },  // 22:30
+                                                     { 14,  0, 1011, 32, 34 },  // 23:00
+                                                     { 14, 30, 1012, 31, 35 },  // 23:30
                                                     };
 #else
 RTC_DATA_ATTR PressArray presAry[MAX_PRESSARRAY] = { CLEAR_PRESSARRAY, CLEAR_PRESSARRAY, CLEAR_PRESSARRAY, CLEAR_PRESSARRAY,
@@ -188,7 +198,7 @@ RTC_DATA_ATTR uint16_t    idxBleSendInterval    = 4;
 uint16_t                  bleSendInterval[MAX_SENDINTERVAL]    = { 1, 3, 5, 10, 15, 30};
 RTC_DATA_ATTR uint8_t     bleDeviceNumber  = 0;             // 0:BLE off / 1～9:Number   BLEDEVICE_NAME + bleDeviceNumber
 
-struct {   // Bluetoothで送信するデータ   2byte * 7 = 14byte
+struct {   // Bluetoothで送信するデータ   2byte * 9 = 18byte
   uint8_t         id;             // uniqueID 送信側の個々IDに使用
   union {
     struct {
@@ -210,6 +220,8 @@ struct {   // Bluetoothで送信するデータ   2byte * 7 = 14byte
   int16_t         temperature;    // 温度         int(temp * 100)
   int16_t         humidity;       // 湿度         int(temp * 100)
   int16_t         voltage;        // 電圧         int(volt * 100)
+  int16_t         tvoc;           // 揮発性有機化合物
+  int16_t         eCO2;           // 二酸化炭素相当量
 } bleDataPacket;  
 
 /*
@@ -280,7 +292,8 @@ void setup() {
 
   // put your setup code here, to run once:
   M5.begin();
-  Wire.begin(0,26,100000);
+  Wire.begin(0,26);
+//  Wire.begin(32,33);
   M5.Lcd.setRotation(lcdDirection);
   M5.Lcd.fillScreen(BLACK);
   M5.Axp.ScreenBreath(lcdBrightness);              // LCDの明るさ　９
@@ -305,8 +318,8 @@ void setup() {
   
   if (!bmp280.begin(0x76)){  
       Serial.println("Could not find a valid BMP280 sensor, check wiring!");
-      while (1);
   }
+
     /* Default settings from datasheet. */
   bmp280.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                   Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
@@ -314,6 +327,16 @@ void setup() {
                   Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                   Adafruit_BMP280::STANDBY_MS_1000); /* Standby time. */
 
+    /* TVOC/eCO2 SGP30センサー */
+  foundSGP30 = false;
+  if (sgp30.begin()) {
+    foundSGP30 = true;
+    readySGP30 += millis();            // readySGP30が0>=なら読み取り可能
+  } else {
+    Serial.println("Sensor not found :(");
+  }
+
+    
     /* BLE SETUP */
   if (bleDeviceNumber != 0) BLE_Setup();  
 
@@ -329,8 +352,6 @@ void setup() {
 
   /* 起動理由の格納 */
   wakeUpCause = esp_sleep_get_wakeup_cause();
-
-  Serial.printf("Struct bleDataPacket size : %d\r\n",sizeof(bleDataPacket));
 }
 
 /*******************************************************
@@ -387,7 +408,18 @@ void loop() {
       powerOffTime = defaultPowerOffTime + millis();
     }    
   }
-  
+
+  /*--- SGP30センサー ---*/
+  if (foundSGP30) {
+    i = readySGP30 - millis();      // if文無いに書くと計算が出来ないらしい。
+    if (i < 0) readySGP30 = 0;
+  }
+  if (readySGP30 <= 0) {
+    if (!sgp30.IAQmeasure()) {
+      Serial.println("Measurement failed");
+      readySGP30 = 15 * 1000  + millis();
+    }
+  }
   
   /*--- 電源ソースを調べる ---*/
   pwVolt = M5.Axp.GetVBusVoltage();
@@ -466,6 +498,8 @@ void loop() {
         bleDataPacket.temperature = (int)(temperature * 100.);
         bleDataPacket.humidity    = (int)(humidity * 100.);
         bleDataPacket.voltage     = (int)(pwVolt * 100.);
+        bleDataPacket.tvoc        = sgp30.TVOC;
+        bleDataPacket.eCO2        = sgp30.eCO2;
         pBLECharacteristic->setValue((uint8_t*)&bleDataPacket, sizeof(bleDataPacket));
         pBLECharacteristic->notify();
         delay(10);
@@ -483,14 +517,14 @@ void loop() {
     if (!extPW || (wakeUpCause == ESP_SLEEP_WAKEUP_TIMER)) {  
       if (millis() > powerOffTime) {     // 20sec
         if (bleDeviceNumber) {
-          i = int(rtcTime.Minutes / bleSendInterval[idxBleSendInterval] + 1) * bleSendInterval[idxBleSendInterval] - rtcTime.Minutes;       // 指定時間間隔（Bluetooth用）
+          i = bleSendInterval[idxBleSendInterval] * 60 - rtcTime.Seconds;      // 指定時間間隔（Bluetooth用）
         } else {
-          i = int(rtcTime.Minutes / 30 + 1) * 30 - rtcTime.Minutes;       // 30分間隔
+          i = 60 * (int(rtcTime.Minutes / 30 + 1) * 30 - rtcTime.Minutes);       // 30分間隔
         }
           //---ここからは AXP192::DeepSleep(uint64_t time_in_us)の必要部分の抜き出し
          xSetSleep();
-         esp_sleep_enable_timer_wakeup(SLEEP_MIN(i));       // 次の計測時刻までスリープ
-         esp_deep_sleep(SLEEP_MIN(i));
+         esp_sleep_enable_timer_wakeup(SLEEP_SEC(i));       // 次の計測時刻までスリープ
+         esp_deep_sleep(SLEEP_SEC(i));
           //--- ここまで
       }
     }
@@ -921,6 +955,22 @@ void DispTempHumi() {
   lcdDblBuf.printf("%.2fv",pwVolt);
 #endif
 
+  // TVOC eCO2
+  if (foundSGP30) {
+    x = 170; y = 90;
+    lcdDblBuf.setTextSize(1);
+    lcdDblBuf.setTextColor(TFT_WHITE);
+    lcdDblBuf.setTextFont(2);
+    lcdDblBuf.setCursor(x,y);
+    if (readySGP30 > 0) {
+      lcdDblBuf.printf("Not ready SGP30");
+    } else {
+      lcdDblBuf.printf("%dppb",sgp30.TVOC);
+      lcdDblBuf.setCursor(x,y+15);
+      lcdDblBuf.printf("%dppm",sgp30.eCO2);
+    }
+  }
+  
     // BLE deviceID
   x = 210; y = 120;
   lcdDblBuf.setTextFont(2);
